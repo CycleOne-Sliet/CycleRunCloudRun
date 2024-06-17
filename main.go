@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -16,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore" 
+	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 )
@@ -147,7 +148,8 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	IV := make([]byte, 16)
 	rand.Read(IV)
 	tokenB64, err := io.ReadAll(r.Body)
-	unparsedToken := make([]byte, len(tokenB64)/4+8)
+	unparsedToken := make([]byte, base64.StdEncoding.DecodedLen(len(tokenB64)))
+	log.Printf("Unparsed Token: %s\n", string(tokenB64))
 	unparsedTokenLen, err := base64.StdEncoding.Decode(unparsedToken, tokenB64)
 	if err != nil {
 		log.Printf("Error while parsing token: %v\n", err)
@@ -157,10 +159,14 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	encryptor := cipher.NewCBCEncrypter(keyCipher, IV)
+	unparsedToken = append(unparsedToken, make([]byte, encryptor.BlockSize()-len(unparsedToken)%encryptor.BlockSize())...)
 	decryptor := cipher.NewCBCDecrypter(keyCipher, unparsedToken[:16])
 	jsonString := make([]byte, unparsedTokenLen)
+	log.Printf("Length of token: %d\n", len(unparsedToken[16:]))
+	log.Printf("The decoded bytes are: %v\n", unparsedToken[16:])
 	decryptor.CryptBlocks(jsonString, unparsedToken[16:])
 	var token RequestToken
+	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)]
 	err = json.Unmarshal(jsonString, &token)
 	if err != nil {
 		log.Printf("Error while decoding token json: %v\n", err)
@@ -209,7 +215,7 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 
 func updateData(w http.ResponseWriter, r *http.Request) {
 	tokenB64, err := io.ReadAll(r.Body)
-	unparsedToken := make([]byte, len(tokenB64)/4+8)
+	unparsedToken := make([]byte, base64.StdEncoding.DecodedLen(len(tokenB64)))
 	unparsedTokenLen, err := base64.StdEncoding.Decode(unparsedToken, tokenB64)
 	if err != nil {
 		log.Printf("Error while parsing token: %v\n", err)
@@ -217,10 +223,11 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Error while parsing token")
 		return
 	}
-
+	unparsedToken = append(unparsedToken, make([]byte, keyCipher.BlockSize()-len(unparsedToken)%keyCipher.BlockSize())...)
 	decryptor := cipher.NewCBCDecrypter(keyCipher, unparsedToken[:16])
 	jsonString := make([]byte, unparsedTokenLen)
 	decryptor.CryptBlocks(jsonString, unparsedToken[16:])
+	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)] 	
 	var token RequestToken
 	err = json.Unmarshal(jsonString, &token)
 	if err != nil {
