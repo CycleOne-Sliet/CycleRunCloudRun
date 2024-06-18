@@ -86,40 +86,40 @@ func verifyFirebaseAuth(r *http.Request) (string, error) {
 }
 
 type User struct {
-	CycleOccupied *firestore.DocumentRef `firebase:"cycleOccupied"`
-	HasCycle      bool                   `firebase:"hasCycle"`
+	CycleOccupied *firestore.DocumentRef `firebase:"CycleOccupied"`
+	HasCycle      bool                   `firebase:"HasCycle"`
 }
 
 type UnlockRequest struct {
-	Cycle      *firestore.DocumentRef `firebase:"cycleId"`
-	MadeAtTime time.Time              `firebase:"madeAtTime"`
-	MadeBy     *firestore.DocumentRef `firebase:"madeBy"`
-	TookFrom   *firestore.DocumentRef `firebase:"tookFrom"`
-	ReturnedAt time.Time              `firebase:"returnedAt"`
-	ReturnedTo *firestore.DocumentRef `firebase:"returnedTo"`
+	Cycle      *firestore.DocumentRef `firebase:"CycleId"`
+	MadeAtTime time.Time              `firebase:"MadeAtTime"`
+	MadeBy     *firestore.DocumentRef `firebase:"MadeBy"`
+	TookFrom   *firestore.DocumentRef `firebase:"TookFrom"`
+	ReturnedAt time.Time              `firebase:"ReturnedAt"`
+	ReturnedTo *firestore.DocumentRef `firebase:"ReturnedTo"`
 }
 
 type Stand struct {
-	Cycle *firestore.DocumentRef `firebase:"cycle"`
-	photo string                 `firebase:"photo"`
+	Cycle *firestore.DocumentRef `firebase:"Cycle"`
+	Photo string                 `firebase:"Photo"`
 }
 
 type StandLocation struct {
-	Stands   []*firestore.DocumentRef `firebase:"stands"`
-	Location string                   `firebase:"location"`
-	photo    string                   `firebase:"photo"`
+	Stands   []*firestore.DocumentRef `firebase:"Stands"`
+	Location string                   `firebase:"Location"`
+	Photo    string                   `firebase:"Photo"`
 }
 
 type Cycle struct {
-	IsUnlocked bool   `firebase:"isUnlocked"`
-	Tag        string `firebase:"tag"`
+	IsUnlocked bool   `firebase:"IsUnlocked"`
+	Tag        string `firebase:"Tag"`
 }
 
 type RequestToken struct {
-	IsUnlocked bool   `json:"isUnlocked"`
-	CycleId    string `json:"cycleId"`
-	StandTime  uint64 `json:"time"`
-	Mac        string `json:"mac"`
+	IsUnlocked bool   `json:"IsUnlocked"`
+	CycleId    string `json:"CycleId"`
+	StandTime  uint64 `json:"Time"`
+	Mac        string `json:"Mac"`
 }
 
 func getToken(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +239,7 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	current_time := time.Now()
 	if token.IsUnlocked {
 		cycleRef := db.Collection("cycles").Doc(token.CycleId)
-		docs := db.Collection("unlockRequests").Where("cycleId", "==", cycleRef).Documents(ctx)
+		docs := db.Collection("unlockRequests").Where("CycleId", "==", cycleRef).Documents(ctx)
 		standRef := db.Collection("stands").Doc(token.Mac)
 		standDoc, err := standRef.Get(ctx)
 		if err != nil {
