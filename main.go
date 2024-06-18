@@ -214,6 +214,14 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateData(w http.ResponseWriter, r *http.Request) {
+	uid, err := verifyFirebaseAuth(r)
+	if err != nil {
+		log.Printf("Error while parsing Auth Token: %v\n", err)
+		w.WriteHeader(401)
+		fmt.Fprintf(w, "User is unauthorized")
+		return
+	}
+	userRef := db.Collection("users").Doc(uid)
 	tokenB64, err := io.ReadAll(r.Body)
 	unparsedToken := make([]byte, base64.StdEncoding.DecodedLen(len(tokenB64)))
 	unparsedTokenLen, err := base64.StdEncoding.Decode(unparsedToken, tokenB64)
@@ -227,7 +235,7 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	decryptor := cipher.NewCBCDecrypter(keyCipher, unparsedToken[:16])
 	jsonString := make([]byte, unparsedTokenLen)
 	decryptor.CryptBlocks(jsonString, unparsedToken[16:])
-	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)] 	
+	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)]
 	var token RequestToken
 	err = json.Unmarshal(jsonString, &token)
 	if err != nil {
@@ -267,6 +275,7 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 			request.ReturnedTo = standRef
 			batch.Set(d.Ref, request)
 		}
+		batch.Set(userRef, User{HasCycle: false, CycleOccupied: nil})
 		batch.End()
 	}
 }
