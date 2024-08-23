@@ -66,7 +66,6 @@ func main() {
 		port = "8080"
 		log.Printf("Defaulting to port %s", port)
 	}
-
 	log.Printf("Listening on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
@@ -175,9 +174,51 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current_time := time.Now()
+	userRef := db.Collection("users").Doc(uid)
+	if token.CycleId == "" {
+		userSnap, err := userRef.Get(ctx)
+		if err != nil {
+			log.Printf("Error while running transaction: %v\n", err)
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Internal error")
+			return
+		}
+		var user User
+		var cycle Cycle
+		err = userSnap.DataTo(&user)
+		if err != nil {
+			log.Printf("Error while running transaction: %v\n", err)
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Internal error")
+			return
+		}
+		cycleSnap, err := user.CycleOccupied.Get(ctx)
+		if err != nil {
+			log.Printf("Error while running transaction: %v\n", err)
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Internal error")
+			return
+		}
+		cycleSnap.DataTo(&cycle)
+		if !user.HasCycle {
+			log.Printf("User does not have any cycle %+v\n", err)
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "User does not have any cycle")
+			return
+		}
+		unencryptedResp := []byte(fmt.Sprintf("%s:%s:%d;", uid, "", current_time.Unix()))
+		unencryptedRespLen := len(unencryptedResp)
+		unencryptedResp = append(unencryptedResp, make([]byte, encryptor.BlockSize()-len(unencryptedResp)%encryptor.BlockSize())...)
+		for i := unencryptedRespLen; i < len(unencryptedResp); i++ {
+			unencryptedResp[i] = 0
+		}
+		response := make([]byte, len(unencryptedResp))
+		encryptor.CryptBlocks(response, unencryptedResp)
+		response = append(IV, response...)
+		w.Write(response)
+	}
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
 	standRef := db.Collection("stands").Doc(token.Mac)
-	userRef := db.Collection("users").Doc(uid)
 	unlockReqCollection := db.Collection("unlockRequests")
 	var stand Stand
 	stand.Cycle = nil
@@ -277,5 +318,14 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 		}
 		batch.Set(userRef, User{HasCycle: false, CycleOccupied: nil})
 		batch.End()
+		log.Printf("Successfully Locked cycle")
+		w.WriteHeader(200)
+		fmt.Fprintf(w, "Success")
+		return
+	} else {
+		log.Printf("Cycle was already locked")
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "Cycle was already locked")
+		return
 	}
 }
