@@ -138,12 +138,6 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	}
 	var user User
 	userSnap.DataTo(&user)
-	if user.HasCycle {
-		log.Print("User already has a cycle")
-		w.WriteHeader(401)
-		fmt.Fprintf(w, "User already has a cycle")
-		return
-	}
 	IV := make([]byte, 16)
 	rand.Read(IV)
 	tokenB64, err := io.ReadAll(r.Body)
@@ -176,14 +170,6 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	current_time := time.Now()
 	userRef := db.Collection("users").Doc(uid)
 	if token.CycleId == "" {
-		userSnap, err := userRef.Get(ctx)
-		if err != nil {
-			log.Printf("Error while running transaction: %v\n", err)
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Internal error")
-			return
-		}
-		var user User
 		var cycle Cycle
 		err = userSnap.DataTo(&user)
 		if err != nil {
