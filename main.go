@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,10 +116,10 @@ type Cycle struct {
 }
 
 type RequestToken struct {
-	IsUnlocked bool   `json:"IsUnlocked"`
-	CycleId    string `json:"CycleId"`
-	StandTime  uint64 `json:"Time"`
-	Mac        string `json:"Mac"`
+	IsUnlocked bool    `json:"IsUnlocked"`
+	CycleId    string  `json:"CycleId"`
+	StandTime  uint64  `json:"Time"`
+	Mac        [6]byte `json:"Mac"`
 }
 
 func getToken(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +169,7 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current_time := time.Now()
+
 	userRef := db.Collection("users").Doc(uid)
 	if token.CycleId == "" {
 		var cycle Cycle
@@ -192,8 +194,15 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "User does not have any cycle")
 			return
 		}
-		unencryptedResp := []byte(fmt.Sprintf("%s:%s:%d;", uid, "", current_time.Unix()))
-		unencryptedRespLen := len(unencryptedResp)
+		unencryptedRespLen := len(uid) + len(token.CycleId) + 16
+		unencryptedResp := make([]byte, 0, unencryptedRespLen)
+		unencryptedResp = append(unencryptedResp, byte(len(uid)))
+		unencryptedResp = append(unencryptedResp, byte(len(token.CycleId)))
+		unencryptedResp = append(unencryptedResp, []byte(uid)...)
+		unencryptedResp = append(unencryptedResp, []byte(token.CycleId)...)
+		unencryptedResp = append(unencryptedResp, token.Mac[:]...)
+		unencryptedResp = binary.BigEndian.AppendUint64(unencryptedResp, token.StandTime)
+
 		unencryptedResp = append(unencryptedResp, make([]byte, encryptor.BlockSize()-len(unencryptedResp)%encryptor.BlockSize())...)
 		for i := unencryptedRespLen; i < len(unencryptedResp); i++ {
 			unencryptedResp[i] = 0
@@ -203,8 +212,9 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		response = append(IV, response...)
 		w.Write(response)
 	}
+	macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
-	standRef := db.Collection("stands").Doc(token.Mac)
+	standRef := db.Collection("stands").Doc(macString)
 	unlockReqCollection := db.Collection("unlockRequests")
 	var stand Stand
 	stand.Cycle = nil
@@ -228,8 +238,15 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Internal error")
 		return
 	}
-	unencryptedResp := []byte(fmt.Sprintf("%s:%s:%d;", uid, token.CycleId, current_time.Unix()))
-	unencryptedRespLen := len(unencryptedResp)
+	unencryptedRespLen := len(uid) + len(token.CycleId) + 16
+	unencryptedResp := make([]byte, 0, unencryptedRespLen)
+	unencryptedResp = append(unencryptedResp, byte(len(uid)))
+	unencryptedResp = append(unencryptedResp, byte(len(token.CycleId)))
+	unencryptedResp = append(unencryptedResp, []byte(uid)...)
+	unencryptedResp = append(unencryptedResp, []byte(token.CycleId)...)
+	unencryptedResp = append(unencryptedResp, token.Mac[:]...)
+	unencryptedResp = binary.BigEndian.AppendUint64(unencryptedResp, token.StandTime)
+
 	unencryptedResp = append(unencryptedResp, make([]byte, encryptor.BlockSize()-len(unencryptedResp)%encryptor.BlockSize())...)
 	for i := unencryptedRespLen; i < len(unencryptedResp); i++ {
 		unencryptedResp[i] = 0
@@ -275,7 +292,8 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	if token.IsUnlocked {
 		cycleRef := db.Collection("cycles").Doc(token.CycleId)
 		docs := db.Collection("unlockRequests").Where("CycleId", "==", cycleRef).Documents(ctx)
-		standRef := db.Collection("stands").Doc(token.Mac)
+		macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
+		standRef := db.Collection("stands").Doc(macString)
 		standDoc, err := standRef.Get(ctx)
 		if err != nil {
 			log.Printf("Error while getting a stand reference: %v\n", err)
