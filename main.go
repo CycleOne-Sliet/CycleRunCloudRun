@@ -267,6 +267,12 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	}
 	userRef := db.Collection("users").Doc(uid)
 	tokenB64, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error while reading token: %v\n", err)
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "Error while reading token")
+		return
+	}
 	unparsedToken := make([]byte, base64.StdEncoding.DecodedLen(len(tokenB64)))
 	unparsedTokenLen, err := base64.StdEncoding.Decode(unparsedToken, tokenB64)
 	if err != nil {
@@ -289,47 +295,40 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current_time := time.Now()
-	if token.IsUnlocked {
-		cycleRef := db.Collection("cycles").Doc(token.CycleId)
-		docs := db.Collection("unlockRequests").Where("CycleId", "==", cycleRef).Documents(ctx)
-		macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
-		standRef := db.Collection("stands").Doc(macString)
-		standDoc, err := standRef.Get(ctx)
-		if err != nil {
-			log.Printf("Error while getting a stand reference: %v\n", err)
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Error while getting stand")
-			return
-		}
-		var stand Stand
-
-		standDoc.DataTo(&stand)
-		stand.Cycle = cycleRef
-		batch := db.BulkWriter(ctx)
-		batch.Set(standRef, stand)
-		for d, err := docs.Next(); d != nil; d, err = docs.Next() {
-			if err != nil {
-				log.Printf("Error while getting a unlock request: %v\n", err)
-				w.WriteHeader(500)
-				fmt.Fprintf(w, "Error while getting unlock request")
-				return
-			}
-			var request UnlockRequest
-			d.DataTo(&request)
-			request.ReturnedAt = current_time
-			request.ReturnedTo = standRef
-			batch.Set(d.Ref, request)
-		}
-		batch.Set(userRef, User{HasCycle: false, CycleOccupied: nil})
-		batch.End()
-		log.Printf("Successfully Locked cycle")
-		w.WriteHeader(200)
-		fmt.Fprintf(w, "Success")
-		return
-	} else {
-		log.Printf("Cycle was already locked")
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "Cycle was already locked")
+	cycleRef := db.Collection("cycles").Doc(token.CycleId)
+	docs := db.Collection("unlockRequests").Where("CycleId", "==", cycleRef).Documents(ctx)
+	macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
+	standRef := db.Collection("stands").Doc(macString)
+	standDoc, err := standRef.Get(ctx)
+	if err != nil {
+		log.Printf("Error while getting a stand reference: %v\n", err)
+		w.WriteHeader(500)
+		fmt.Fprintf(w, "Error while getting stand")
 		return
 	}
+	var stand Stand
+
+	standDoc.DataTo(&stand)
+	stand.Cycle = cycleRef
+	batch := db.BulkWriter(ctx)
+	batch.Set(standRef, stand)
+	for d, err := docs.Next(); d != nil; d, err = docs.Next() {
+		if err != nil {
+			log.Printf("Error while getting a unlock request: %v\n", err)
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Error while getting unlock request")
+			return
+		}
+		var request UnlockRequest
+		d.DataTo(&request)
+		request.ReturnedAt = current_time
+		request.ReturnedTo = standRef
+		batch.Set(d.Ref, request)
+	}
+	batch.Set(userRef, User{HasCycle: false, CycleOccupied: nil})
+	batch.End()
+	log.Printf("Successfully Locked cycle")
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "Success")
+	return
 }
