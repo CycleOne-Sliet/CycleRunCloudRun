@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -116,10 +115,56 @@ type Cycle struct {
 }
 
 type RequestToken struct {
-	IsUnlocked bool    `json:"IsUnlocked"`
-	CycleId    string  `json:"CycleId"`
-	StandTime  uint64  `json:"Time"`
-	Mac        [6]byte `json:"Mac"`
+	CycleId   string  `json:"CycleId"`
+	StandTime uint64  `json:"Time"`
+	Mac       [6]byte `json:"Mac"`
+}
+
+func NewRequestToken(data []byte) (RequestToken, error) {
+	log.Printf("Data Length = %d\n", len(data))
+	reader := bytes.NewReader(data)
+	cycleIdLen, err := reader.ReadByte()
+	if err != nil {
+		return RequestToken{}, err
+	}
+	log.Printf("CycleIdLen = %d\n", cycleIdLen)
+	cycleIdBuilder := strings.Builder{}
+	cycleIdBuilder.Grow(int(cycleIdLen))
+	written, err := io.CopyN(&cycleIdBuilder, reader, int64(cycleIdLen))
+	if written != int64(cycleIdLen) {
+		log.Printf("Read %d bytes when reading Mac", written)
+		if err != nil {
+			return RequestToken{}, errors.New("Message was too short")
+		}
+	}
+	var mac [6]byte
+	n, err := reader.Read(mac[:])
+	if n != 6 {
+		log.Printf("Read %d bytes when reading Mac", n)
+		if err != nil {
+			return RequestToken{}, errors.New("Message was too short")
+		}
+	}
+	if err != nil {
+		return RequestToken{}, err
+	}
+	var timeBytes [8]byte
+	n, err = reader.Read(timeBytes[:])
+	if n != 8 {
+		log.Printf("Read %d bytes when reading time", n)
+		if err != nil {
+			return RequestToken{}, errors.New("Message was too short")
+		}
+	}
+	if err != nil {
+		return RequestToken{}, err
+	}
+	respTime := binary.BigEndian.Uint64(timeBytes[:])
+	return RequestToken{
+		CycleId:   cycleIdBuilder.String(),
+		StandTime: respTime,
+		Mac:       mac,
+	}, nil
 }
 
 func getToken(w http.ResponseWriter, r *http.Request) {
@@ -155,15 +200,13 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	encryptor := cipher.NewCBCEncrypter(keyCipher, IV)
 	unparsedToken = append(unparsedToken, make([]byte, encryptor.BlockSize()-len(unparsedToken)%encryptor.BlockSize())...)
 	decryptor := cipher.NewCBCDecrypter(keyCipher, unparsedToken[:16])
-	jsonString := make([]byte, unparsedTokenLen)
+	decryptedStandToken := make([]byte, unparsedTokenLen)
 	log.Printf("Length of token: %d\n", len(unparsedToken[16:]))
 	log.Printf("The decoded bytes are: %v\n", unparsedToken[16:])
-	decryptor.CryptBlocks(jsonString, unparsedToken[16:])
-	var token RequestToken
-	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)]
-	err = json.Unmarshal(jsonString, &token)
+	decryptor.CryptBlocks(decryptedStandToken, unparsedToken[16:])
+	token, err := NewRequestToken(decryptedStandToken)
 	if err != nil {
-		log.Printf("Error while decoding token json: %v\n", err)
+		log.Printf("Error while decoding token data: %v\n", err)
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "Error while parsing token")
 		return
@@ -204,15 +247,12 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		unencryptedResp = binary.BigEndian.AppendUint64(unencryptedResp, token.StandTime)
 
 		unencryptedResp = append(unencryptedResp, make([]byte, encryptor.BlockSize()-len(unencryptedResp)%encryptor.BlockSize())...)
-		for i := unencryptedRespLen; i < len(unencryptedResp); i++ {
-			unencryptedResp[i] = 0
-		}
 		response := make([]byte, len(unencryptedResp))
 		encryptor.CryptBlocks(response, unencryptedResp)
 		response = append(IV, response...)
 		w.Write(response)
 	}
-	macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
+	macString := fmt.Sprintf("%X:%X:%X:%X:%X:%X", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
 	standRef := db.Collection("stands").Doc(macString)
 	unlockReqCollection := db.Collection("unlockRequests")
@@ -244,13 +284,17 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	unencryptedResp = append(unencryptedResp, byte(len(token.CycleId)))
 	unencryptedResp = append(unencryptedResp, []byte(uid)...)
 	unencryptedResp = append(unencryptedResp, []byte(token.CycleId)...)
+	log.Printf("Mac = %+v\n", token.Mac)
 	unencryptedResp = append(unencryptedResp, token.Mac[:]...)
 	unencryptedResp = binary.BigEndian.AppendUint64(unencryptedResp, token.StandTime)
 
 	unencryptedResp = append(unencryptedResp, make([]byte, encryptor.BlockSize()-len(unencryptedResp)%encryptor.BlockSize())...)
-	for i := unencryptedRespLen; i < len(unencryptedResp); i++ {
-		unencryptedResp[i] = 0
+	log.Printf("len(unencryptedResp) = %d, unencryptedRespLen = %d\n", len(unencryptedResp), unencryptedRespLen)
+	tempStr := make([]byte, 0, len(unencryptedResp)*2)
+	for _, v := range unencryptedResp {
+		tempStr = append([]byte(tempStr), fmt.Sprintf("%x", v)...)
 	}
+	log.Printf("unencryptedResp = %s\n", string(tempStr))
 	response := make([]byte, len(unencryptedResp))
 	encryptor.CryptBlocks(response, unencryptedResp)
 	response = append(IV, response...)
@@ -283,13 +327,11 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	}
 	unparsedToken = append(unparsedToken, make([]byte, keyCipher.BlockSize()-len(unparsedToken)%keyCipher.BlockSize())...)
 	decryptor := cipher.NewCBCDecrypter(keyCipher, unparsedToken[:16])
-	jsonString := make([]byte, unparsedTokenLen)
-	decryptor.CryptBlocks(jsonString, unparsedToken[16:])
-	jsonString = jsonString[:bytes.IndexByte(jsonString, 0)]
-	var token RequestToken
-	err = json.Unmarshal(jsonString, &token)
+	decryptedStandResp := make([]byte, unparsedTokenLen)
+	decryptor.CryptBlocks(decryptedStandResp, unparsedToken[16:])
+	token, err := NewRequestToken(decryptedStandResp)
 	if err != nil {
-		log.Printf("Error while decoding token json: %v\n", err)
+		log.Printf("Error while decoding token: %v\n", err)
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "Error while parsing token")
 		return
@@ -297,7 +339,7 @@ func updateData(w http.ResponseWriter, r *http.Request) {
 	current_time := time.Now()
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
 	docs := db.Collection("unlockRequests").Where("CycleId", "==", cycleRef).Documents(ctx)
-	macString := fmt.Sprintf("%x:%x:%x:%x:%x:%x", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
+	macString := fmt.Sprintf("%X:%X:%X:%X:%X:%X", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
 	standRef := db.Collection("stands").Doc(macString)
 	standDoc, err := standRef.Get(ctx)
 	if err != nil {
