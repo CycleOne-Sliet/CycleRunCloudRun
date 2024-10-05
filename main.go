@@ -215,7 +215,6 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 
 	userRef := db.Collection("users").Doc(uid)
 	if token.CycleId == "" {
-		var cycle Cycle
 		err = userSnap.DataTo(&user)
 		if err != nil {
 			log.Printf("Error while running transaction: %v\n", err)
@@ -223,14 +222,6 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "Internal error")
 			return
 		}
-		cycleSnap, err := user.CycleOccupied.Get(ctx)
-		if err != nil {
-			log.Printf("Error while running transaction: %v\n", err)
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Internal error")
-			return
-		}
-		cycleSnap.DataTo(&cycle)
 		if !user.HasCycle {
 			log.Printf("User does not have any cycle %+v\n", err)
 			w.WriteHeader(500)
@@ -251,6 +242,7 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 		encryptor.CryptBlocks(response, unencryptedResp)
 		response = append(IV, response...)
 		w.Write(response)
+		return;
 	}
 	macString := fmt.Sprintf("%X:%X:%X:%X:%X:%X", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
