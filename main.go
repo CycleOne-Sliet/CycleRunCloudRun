@@ -254,6 +254,7 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	}
 	macString := fmt.Sprintf("%X:%X:%X:%X:%X:%X", token.Mac[0], token.Mac[1], token.Mac[2], token.Mac[3], token.Mac[4], token.Mac[5])
 	cycleRef := db.Collection("cycles").Doc(token.CycleId)
+	cycleRef.Create(ctx, Cycle{IsUnlocked: true, Tag: token.CycleId})
 	standRef := db.Collection("stands").Doc(macString)
 	unlockReqCollection := db.Collection("unlockRequests")
 	var stand Stand
