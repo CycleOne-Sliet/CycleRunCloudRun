@@ -121,9 +121,8 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Printf("Error while parsing getting info about user: %v\n", err)
-		w.WriteHeader(500)
-		fmt.Fprintf(w, "Error while parsing getting info about user")
-		return
+		log.Println("Creating a new entry for user")
+		db.Collection("users").Doc(uid).Create(ctx, User{CycleOccupied: -1, Strikes: 0, HasCycle: false})
 	}
 
 	var user User
@@ -161,7 +160,8 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Data Recieved: %v\n", data)
 
-	macAddress, Unlocked, err := decodeResp(data)
+	macAddress, Unlocked, _, err := decodeResp(data)
+	defer db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Trigger", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: Unlocked})
 	if err != nil {
 		log.Printf("Error while reading the request data: %v\n", err)
 		w.WriteHeader(500)
@@ -171,12 +171,11 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(response[:])
 	log.Printf("Written the data: %v\n", data)
-	db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Trigger", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: Unlocked})
 }
 
-func decodeResp(data []byte) (net.HardwareAddr, bool, error) {
+func decodeResp(data []byte) (net.HardwareAddr, bool, bool, error) {
 	if len(data) != 40 {
-		return nil, false, errors.New("Data length is not equal to 40")
+		return nil, false, false, errors.New("Data length is not equal to 40")
 	}
 	decryptedResp := [16]byte{}
 	decryptor := cipher.NewCBCDecrypter(keyCipher, data[8:24])
@@ -189,12 +188,13 @@ func decodeResp(data []byte) (net.HardwareAddr, bool, error) {
 		}
 	}
 	if !valid {
-		return nil, false, errors.New("Verification id mismatch")
+		return nil, false, false, errors.New("Verification id mismatch")
 	}
 	isStandUnlocked := decryptedResp[8] == 1
+	strike := decryptedResp[8] > 1
 	macAddressBytes := decryptedResp[9:15]
 	macAddress := net.HardwareAddr(macAddressBytes)
-	return macAddress, isStandUnlocked, nil
+	return macAddress, isStandUnlocked, strike, nil
 }
 
 func recieveTriggerToken(w http.ResponseWriter, r *http.Request) {
@@ -215,12 +215,14 @@ func recieveTriggerToken(w http.ResponseWriter, r *http.Request) {
 	var user User
 	userSnap.DataTo(&user)
 	resp, err := io.ReadAll(r.Body)
+
 	if err != nil {
 		log.Printf("Error while parsing the body: %v\n", err)
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "Error while parsing the body")
 		return
 	}
+
 	if len(resp) != 40 {
 		log.Printf("Error while parsing the body: %s\n", "length is not equal to 40")
 		w.WriteHeader(500)
@@ -228,11 +230,21 @@ func recieveTriggerToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	macAddress, isStandUnlocked, err := decodeResp(resp)
+	macAddress, isStandUnlocked, isStrike, err := decodeResp(resp)
 
+	defer db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Response", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: isStandUnlocked})
+
+	if (isStrike) {
+		user.Strikes++
+		userSnap.Ref.Set(ctx, user)
+		log.Printf("Stand reported an inconsistent state\n")
+		w.WriteHeader(500)
+		fmt.Fprintf(w, "Stand reported an inconsistent state")
+		return
+	}
+	
 	log.Printf("Data Recieved: %v\n", resp)
 
-	db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Response", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: isStandUnlocked})
 	standSnap, err := db.Collection("stands").Doc(macAddress.String()).Get(ctx)
 	var stand Stand
 	standSnap.DataTo(&stand)
