@@ -139,6 +139,9 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 		unencryptedResp[8] = 1
 	}
 	response := [40]byte{}
+	for i := 0; i < 40; i++ {
+		response[i] = 0
+	}
 	for i := 0; i < 8; i++ {
 		response[i] = unencryptedResp[i]
 	}
@@ -167,6 +170,7 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 
 	}
 	w.Write(response[:])
+	log.Printf("Written the data: %v\n", data)
 	db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Trigger", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: Unlocked})
 }
 
