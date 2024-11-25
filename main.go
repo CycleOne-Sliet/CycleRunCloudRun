@@ -156,6 +156,8 @@ func sendTriggerToken(w http.ResponseWriter, r *http.Request) {
 
 	}
 
+	log.Printf("Data Recieved: %v\n", data)
+
 	macAddress, Unlocked, err := decodeResp(data)
 	if err != nil {
 		log.Printf("Error while reading the request data: %v\n", err)
@@ -223,6 +225,8 @@ func recieveTriggerToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	macAddress, isStandUnlocked, err := decodeResp(resp)
+
+	log.Printf("Data Recieved: %v\n", resp)
 
 	db.Collection("journal").Add(ctx, JournalEntry{EntryTime: time.Now(), Type: "Response", By: userSnap.Ref, Stand: db.Collection("stands").Doc(macAddress.String()), IsUnlocked: isStandUnlocked})
 	standSnap, err := db.Collection("stands").Doc(macAddress.String()).Get(ctx)
