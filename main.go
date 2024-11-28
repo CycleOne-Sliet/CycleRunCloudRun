@@ -190,8 +190,9 @@ func decodeResp(data []byte) (net.HardwareAddr, bool, bool, error) {
 	if !valid {
 		return nil, false, false, errors.New("Verification id mismatch")
 	}
-	isStandUnlocked := decryptedResp[8] == 1
+	isStandUnlocked := (decryptedResp[8] & 0x01) == 1
 	strike := decryptedResp[8] > 1
+
 	macAddressBytes := decryptedResp[9:15]
 	macAddress := net.HardwareAddr(macAddressBytes)
 	return macAddress, isStandUnlocked, strike, nil
